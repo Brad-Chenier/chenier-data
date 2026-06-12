@@ -25,7 +25,7 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
 
 PAGE_LOAD_TIMEOUT_MS = 60_000
-APP_READY_TIMEOUT_MS = 150_000
+APP_READY_TIMEOUT_MS = 45_000
 WAKE_BOOT_GRACE_SEC  = 20
 
 # Streamlit's root element has varied across versions; accept any of these.
