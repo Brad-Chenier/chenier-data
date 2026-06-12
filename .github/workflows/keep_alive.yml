@@ -10,7 +10,7 @@ on:
 jobs:
   ping:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - name: Check out repo
         uses: actions/checkout@v5
@@ -26,4 +26,6 @@ jobs:
           playwright install --with-deps chromium
 
       - name: Ping apps
-        run: python keep_alive.py
+        run: python -u keep_alive.py
+        env:
+          PYTHONUNBUFFERED: "1"
