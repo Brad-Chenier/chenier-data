@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
 Chenier Environmental Consulting
-Streamlit Community Cloud keep-alive pinger  (v2 — diagnostics)
+Streamlit Community Cloud keep-alive pinger  (v4)
 
-Visits each app with a headless browser so the visit counts as real
-traffic. Wakes sleeping apps. On failure, prints the page title and
-visible text so the Actions log shows exactly what the browser saw.
+Streamlit renders as a JS app (often inside an iframe), so the top-level
+document body stays empty even when the app is fully up. v4 detects
+readiness the right way: it wakes any sleeping app, waits for the network
+to go idle, and confirms the app by checking the correct page title plus
+rendered content in the page OR any child frame.
 """
 
 import sys
@@ -25,46 +27,70 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
 
 PAGE_LOAD_TIMEOUT_MS = 60_000
-APP_READY_TIMEOUT_MS = 45_000
-WAKE_BOOT_GRACE_SEC  = 20
+NETWORK_IDLE_TIMEOUT_MS = 60_000
+WAKE_BOOT_GRACE_SEC = 25
 
-# Streamlit's root element has varied across versions; accept any of these.
 APP_SELECTOR = ('[data-testid="stApp"], .stApp, '
                 '[data-testid="stAppViewContainer"], '
                 '[data-testid="stHeader"], section.main')
 
 
+def rendered_text_len(page) -> int:
+    """Total visible text length across the page and all its frames."""
+    total = 0
+    for fr in page.frames:
+        try:
+            t = fr.evaluate("document.body ? document.body.innerText : ''")
+            total += len(t.strip())
+        except Exception:
+            pass
+    return total
+
+
+def app_selector_present(page) -> bool:
+    """True if the Streamlit root element exists in the page or any frame."""
+    for fr in page.frames:
+        try:
+            if fr.query_selector(APP_SELECTOR):
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def find_wake_button(page):
+    for fr in page.frames:
+        try:
+            btn = fr.get_by_text("get this app back up", exact=False)
+            if btn.count() > 0 and btn.first.is_visible():
+                return btn.first
+        except Exception:
+            pass
+    return None
+
+
+def wait_ready(page) -> bool:
+    """Wait for the app to finish loading and confirm it rendered."""
+    try:
+        page.wait_for_load_state("networkidle", timeout=NETWORK_IDLE_TIMEOUT_MS)
+    except PWTimeout:
+        pass  # fall through to content checks anyway
+    # Give late JS a moment, then poll for rendered content.
+    for _ in range(10):
+        if app_selector_present(page) or rendered_text_len(page) > 0:
+            return True
+        time.sleep(2)
+    return False
+
+
 def dump_page(page, label: str):
-    """Print what the browser is actually looking at."""
     try:
         title = page.title()
     except Exception:
         title = "(unavailable)"
-    try:
-        text = page.evaluate("document.body ? document.body.innerText : ''")
-        text = " ".join(text.split())[:600]
-    except Exception:
-        text = "(unavailable)"
-    print(f"  [{label}] page title: {title!r}")
-    print(f"  [{label}] page text : {text!r}")
-
-
-def is_app_ready(page) -> bool:
-    try:
-        page.wait_for_selector(APP_SELECTOR, timeout=APP_READY_TIMEOUT_MS)
-        return True
-    except PWTimeout:
-        return False
-
-
-def find_wake_button(page):
-    btn = page.get_by_text("get this app back up", exact=False)
-    try:
-        if btn.count() > 0 and btn.first.is_visible():
-            return btn.first
-    except Exception:
-        pass
-    return None
+    print(f"  [{label}] title={title!r} frames={len(page.frames)} "
+          f"text_len={rendered_text_len(page)} "
+          f"selector={app_selector_present(page)}")
 
 
 def ping_app(context, url: str) -> bool:
@@ -72,7 +98,7 @@ def ping_app(context, url: str) -> bool:
     page = context.new_page()
     try:
         page.goto(url, timeout=PAGE_LOAD_TIMEOUT_MS, wait_until="domcontentloaded")
-        time.sleep(8)  # let the sleeping page or the app shell render
+        time.sleep(5)
 
         wake = find_wake_button(page)
         if wake:
@@ -80,20 +106,19 @@ def ping_app(context, url: str) -> bool:
             wake.click()
             time.sleep(WAKE_BOOT_GRACE_SEC)
 
-        if is_app_ready(page):
+        if wait_ready(page):
             print("App is awake. ✔")
             return True
 
-        print("App UI not detected — dumping page state, then reloading once...")
-        dump_page(page, "before reload")
+        print("App not confirmed — reloading once...")
         page.reload(timeout=PAGE_LOAD_TIMEOUT_MS, wait_until="domcontentloaded")
-        time.sleep(8)
-        if is_app_ready(page):
+        time.sleep(5)
+        if wait_ready(page):
             print("App is awake after reload. ✔")
             return True
 
-        print("FAILED: app UI never appeared. ✘")
-        dump_page(page, "after reload")
+        print("FAILED: app never confirmed ready. ✘")
+        dump_page(page, "final")
         return False
     except Exception as e:
         print(f"FAILED: {e!r} ✘")
