@@ -19,7 +19,6 @@ from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 APP_URLS = [
     "https://chenierlocationmap.streamlit.app",
     "https://chenier-site-plan-figure.streamlit.app",
-    "https://chenier-topo-figure3.streamlit.app",
     "https://chenier-topo-generator.streamlit.app",
 ]
 # ─────────────────────────────────────────────────────────────────────────────
