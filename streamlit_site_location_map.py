@@ -168,6 +168,21 @@ def build_osm_canvas(bounds, zoom, out_w, out_h, progress=None):
     cx0, cy0 = max(0, int(cx0)), max(0, int(cy0))
     cx1, cy1 = min(canvas_w, int(cx1)), min(canvas_h, int(cy1))
 
+    # Trim the crop box to exactly the output aspect ratio. Pixel space on
+    # the tile canvas is uniform Web Mercator, so pixel aspect = ground
+    # aspect — this guarantees the final resize is distortion-free.
+    target_ar = out_w / out_h
+    crop_w, crop_h = cx1 - cx0, cy1 - cy0
+    if crop_w > 0 and crop_h > 0:
+        if crop_w / crop_h > target_ar:      # too wide — trim width
+            new_w = int(crop_h * target_ar)
+            dx = (crop_w - new_w) // 2
+            cx0 += dx; cx1 = cx0 + new_w
+        else:                                # too tall — trim height
+            new_h = int(crop_w / target_ar)
+            dy = (crop_h - new_h) // 2
+            cy0 += dy; cy1 = cy0 + new_h
+
     geo = (nw_lng, se_lat, se_lng, nw_lat)
     if cx1 > cx0 and cy1 > cy0:
         canvas = canvas.crop((cx0, cy0, cx1, cy1))
@@ -405,6 +420,32 @@ if generate:
                 buf_bounds = (min_lng - lng_buf, min_lat - lat_buf,
                               max_lng + lng_buf, max_lat + lat_buf)
 
+                # Expand the shorter dimension in Web Mercator so the bbox
+                # aspect ratio matches the output image — prevents stretch.
+                def _to_merc(lng, lat):
+                    x = lng * 20037508.34 / 180.0
+                    y = math.log(math.tan((90 + lat) * math.pi / 360.0)) / (math.pi / 180.0)
+                    return x, y * 20037508.34 / 180.0
+
+                def _to_lnglat(x, y):
+                    lng = x / 20037508.34 * 180.0
+                    lat = math.degrees(2 * math.atan(
+                        math.exp(y / 20037508.34 * math.pi)) - math.pi / 2)
+                    return lng, lat
+
+                mx0, my0 = _to_merc(buf_bounds[0], buf_bounds[1])
+                mx1, my1 = _to_merc(buf_bounds[2], buf_bounds[3])
+                bw, bh = mx1 - mx0, my1 - my0
+                target_ar = IMG_W_PX / IMG_H_PX
+                cx, cy = (mx0 + mx1) / 2, (my0 + my1) / 2
+                if bw / bh < target_ar:    # too tall — widen
+                    bw = bh * target_ar
+                else:                      # too wide — heighten
+                    bh = bw / target_ar
+                lng0, lat0 = _to_lnglat(cx - bw / 2, cy - bh / 2)
+                lng1, lat1 = _to_lnglat(cx + bw / 2, cy + bh / 2)
+                buf_bounds = (lng0, lat0, lng1, lat1)
+
                 zoom = choose_zoom(buf_bounds, IMG_W_PX, IMG_H_PX)
                 st.write(f"Fetching OpenStreetMap tiles (zoom {zoom})...")
 
@@ -453,3 +494,4 @@ if generate:
 
 st.markdown("---")
 st.caption("Map data © OpenStreetMap contributors")
+
