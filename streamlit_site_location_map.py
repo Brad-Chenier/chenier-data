@@ -382,7 +382,7 @@ col1, col2 = st.columns([2, 1])
 with col1:
     project_no = st.text_input("**2. Project number**", placeholder="e.g. 26-014")
 with col2:
-    buffer_factor = st.slider("**Zoom out**", 0.3, 2.0, 1.0, 0.1,
+    buffer_factor = st.slider("**Zoom out**", 0.3, 30.0, 1.0, 0.1,
                               help="Higher = more surrounding area shown")
 
 generate = st.button("⚡ Generate Site Location Map", type="primary", use_container_width=True)
